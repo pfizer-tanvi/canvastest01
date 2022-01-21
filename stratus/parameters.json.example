@@ -1,0 +1,90 @@
+[
+    {
+        "ParameterKey": "Memory",
+        "ParameterValue": "1024"
+    },
+    {
+        "ParameterKey": "AppEnv",
+        "ParameterValue": "staging"
+    },
+    {
+        "ParameterKey": "AppName",
+        "ParameterValue": "stratus-core-laravel"
+    },
+    {
+        "ParameterKey": "AppID",
+        "ParameterValue": "500"
+    },
+    {
+        "ParameterKey": "PublicSite",
+        "ParameterValue": "no"
+    },
+    {
+        "ParameterKey": "Version",
+        "ParameterValue": "001"
+    },
+    {
+        "ParameterKey": "UniqueDomainName",
+        "ParameterValue": "stratus-core-laravel.digitalpfizer.com"
+    },
+    {
+        "ParameterKey": "AppKey",
+        "ParameterValue": "base64:hzCPlF1f013vxVYKFMfaHNF0P4xDKrhIdjMWSDeuiT0="
+    },
+    {
+        "ParameterKey": "DbHost",
+        "ParameterValue": ""
+    },
+    {
+        "ParameterKey": "DbName",
+        "ParameterValue": ""
+    },
+    {
+        "ParameterKey": "DbUsername",
+        "ParameterValue": ""
+    },
+    {
+        "ParameterKey": "DbPassword",
+        "ParameterValue": ""
+    },
+    {
+        "ParameterKey": "CognitoClientSecret",
+        "ParameterValue": ""
+    },
+    {
+        "ParameterKey": "DesiredCount",
+        "ParameterValue": "0"
+    },
+    {
+        "ParameterKey": "CognitoUserPoolId",
+        "ParameterValue": "eu-west-1_XqKGA2Dyi"
+    },
+    {
+        "ParameterKey": "KmsMasterKeyId",
+        "ParameterValue": "arn:aws:kms:eu-west-1:364215618558:key/a7db586c-e3f4-4813-8018-2f6f6c8f702c"
+    },
+    {
+        "ParameterKey": "PusherAppId",
+        "ParameterValue": ""
+    },
+    {
+        "ParameterKey": "PusherAppCluster",
+        "ParameterValue": ""
+    },
+    {
+        "ParameterKey": "PusherAppKey",
+        "ParameterValue": ""
+    },
+    {
+        "ParameterKey": "PusherAppSecret",
+        "ParameterValue": ""
+    },
+    {
+        "ParameterKey": "SentryDSN",
+        "ParameterValue": "https://public-key@o772704.ingest.sentry.io/project-id"
+    },
+    {
+        "ParameterKey": "SentryTracesSampleRate",
+        "ParameterValue": "1.0"
+    }
+]

@@ -1,0 +1,25 @@
+filebeat.prospectors:
+  - input_type: log
+    paths:
+      - /app/storage/logs/*.json
+    document_type: APP_NAME-app_logs
+    json.keys_under_root: true
+
+  - input_type: log
+    paths:
+      - /app/storage/logs/*.log
+    document_type: APP_NAME-app_logs
+    multiline:
+      pattern: '^\[[0-9]{4}-[0-9]{2}-[0-9]{2}'
+      negate: true
+      match: after
+
+tags: [APP_NAME]
+
+fields:
+  env: APP_ENV
+
+output.logstash:
+  hosts: ["incoming.logs.digitalpfizer.com:6799"]
+
+  ssl.certificate_authorities: ["/etc/ssl/entrust_ev_ca.cer"]
