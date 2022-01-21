@@ -1,0 +1,37 @@
+version: 0.2
+phases:
+    pre_build:
+        commands:
+            - wget https://github.com/mikefarah/yq/releases/download/v4.13.3/yq_linux_386.tar.gz -O - | tar xz && mv yq_linux_386 /usr/bin/yq
+            - aws ecr get-login-password --region ${AWSRegion} | docker login --username AWS --password-stdin ${AWSAccountId}.dkr.ecr.${AWSRegion}.amazonaws.com
+            - echo "Getting ENV file from Secrets cat/${AppName}-${AppEnv}/core"
+            # - aws secretsmanager get-secret-value --secret-id "cat/${AppName}-${AppEnv}/core" --query SecretString --output text --region ${AWSRegion} > .env
+            - echo "Getting Core Env Settings"
+            - printf "\n# ENV CORE SETTINGS\n" >> .env
+            # - aws secretsmanager get-secret-value --secret-id "cat/env/core" --query SecretString --output text --region ${AWSRegion} >> .env
+            - printf "\n# END ENV CORE SETTINGS\n" >> .env
+            - echo "Getting your env additions"
+            - printf "\n# ENV ADDITIONS\n" >> .env
+            # - aws secretsmanager get-secret-value --secret-id "cat/${AppName}-${AppEnv}/additions" --query SecretString --output text --region ${AWSRegion} >> .env
+            - sed -e "s/APP_ENV/${AppEnv}/g" -e "s/APP_NAME/${AppName}/g"  filebeat-template.yml > filebeat.yml
+            - cp supervisor-uat.ini supervisor.ini
+    build:
+        commands:
+            - APP_DOCKER_CORE_TAG=$(yq e '.build.app_docker_core_tag' stratus/config.yaml)
+            - |
+                if [ $AppEnv = "staging" ]; then
+                    APP_DOCKER_TAG=latest
+                else
+                    APP_DOCKER_TAG=${AppEnv}_$(git rev-parse HEAD)
+                fi
+            - docker pull ${AppName}:latest ${AWSAccountId}.dkr.ecr.${AWSRegion}.amazonaws.com/${AppName}:${APP_DOCKER_TAG} || true
+            - docker build -t ${AppName} --build-arg FROM_IMAGE=${AWSAccountId}.dkr.ecr.${AWSRegion}.amazonaws.com/stratus-ecr-core-php:${APP_DOCKER_CORE_TAG} .
+            - docker tag ${AppName}:latest ${AWSAccountId}.dkr.ecr.${AWSRegion}.amazonaws.com/${AppName}:${APP_DOCKER_TAG}
+    post_build:
+        commands:
+            - HASH=$(git rev-parse HEAD)
+            - echo Build completed on `date`
+            - echo Pushing the Docker image...
+            - docker push ${AWSAccountId}.dkr.ecr.${AWSRegion}.amazonaws.com/${AppName}:${AppEnv}_$HASH
+artifacts:
+    files: imagedefinitions.json
