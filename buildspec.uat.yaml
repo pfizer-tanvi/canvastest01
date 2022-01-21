@@ -1,0 +1,31 @@
+version: 0.2
+phases:
+    pre_build:
+        commands:
+            - echo Logging in to Amazon ECR for region ${AWSRegion}
+            - aws ecr get-login-password --region ${AWSRegion} | docker login --username AWS --password-stdin ${AWSAccountId}.dkr.ecr.${AWSRegion}.amazonaws.com
+            - echo "Getting ENV file from Secrets cat/${APP_NAME}-${AppEnv}/core"
+            # - aws secretsmanager get-secret-value --secret-id "cat/${AppName}-${AppEnv}/core" --query SecretString --output text --region ${AWSRegion} > .env
+            - echo "Getting Core Env Settings"
+            - printf "\n# ENV CORE SETTINGS\n" >> .env
+            # - aws secretsmanager get-secret-value --secret-id "cat/env/core" --query SecretString --output text --region ${AWSRegion} >> .env
+            - printf "\n# END ENV CORE SETTINGS\n" >> .env
+            - echo "Getting your env additions"
+            - printf "\n# ENV ADDITIONS\n" >> .env
+            # - aws secretsmanager get-secret-value --secret-id "cat/${AppName}-${AppEnv}/additions" --query SecretString --output text --region ${AWSRegion} >> .env
+            - sed -e "s/APP_ENV/${AppEnv}/g" -e "s/APP_NAME/${AppName}/g"  filebeat-template.yml > filebeat.yml
+            - cp supervisor-uat.ini supervisor.ini
+    build:
+        commands:
+            - printf '[{"name":"%s-%s","imageUri":"%s.dkr.ecr.%s.amazonaws.com/%s:%s_%s"}]' $AppName $AppEnv $AWSAccountId $AWSRegion $AppName $AppEnv $HASH > imagedefinitions.json
+            - docker build -t ${AppName} --build-arg FROM_IMAGE=${AWSAccountId}.dkr.ecr.${AWSRegion}.amazonaws.com/cat-core-docker:php_74_min_20210818 .
+            - HASH=$(git rev-parse HEAD)
+            - docker tag ${AppName}:latest ${AWSAccountId}.dkr.ecr.${AWSRegion}.amazonaws.com/${AppName}:${AppEnv}_$HASH
+    post_build:
+        commands:
+            - HASH=$(git rev-parse HEAD)
+            - echo Build completed on `date`
+            - echo Pushing the Docker image...
+            - docker push ${AWSAccountId}.dkr.ecr.${AWSRegion}.amazonaws.com/${AppName}:${AppEnv}_$HASH
+artifacts:
+    files: imagedefinitions.json

@@ -1,0 +1,7 @@
+current: '1.0.0'
+
+versions:
+  - version: '1.0.0'
+    updated: 'Sun, 19 Sep 2021 00:00:00 GMT'
+    notes: |
+      - initial release of files with stratus-sync

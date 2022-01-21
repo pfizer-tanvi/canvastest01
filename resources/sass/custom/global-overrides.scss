@@ -1,0 +1,208 @@
+/**
+ * Inspinia Theme level global overrides for both single page app and widgets.
+ */
+
+ /**
+ * CONTENTS
+ *
+ * #TOP_NAV
+ *
+ * #TABLE-RESPONSIVE
+ * 
+ * #BREAD_CRUMBS
+ * 
+ * #LOGIN_PAGE
+ *
+ */
+
+ /*------------------------------------*\
+     #TOP_NAV
+ \*------------------------------------*/
+
+.logo-app {
+    margin: 15px 0 0 10px;
+    height: 30px;
+    width: 188px;
+}
+
+.navbar-fixed-top {
+    box-shadow: 0px -3px 13px #CCC;
+	background: #fff;
+}
+
+.pace .pace-progress {
+  left: 0px;
+}
+
+body.skin-1 {
+  background: #ffffff;
+}
+
+body.body-small.fixed-sidebar.mini-navbar #page-wrapper {
+  margin: 0 0 0 0;
+}
+
+ /*------------------------------------*\
+     #TABLE-RESPONSIVE
+ \*------------------------------------*/
+
+.table-responsive tbody > tr > td, .table > tfoot > tr > td {
+    border-top: 1px solid #e7eaec;
+    line-height: 1.42857;
+    padding: 8px;
+    vertical-align: middle;
+}
+
+ /*------------------------------------*\
+     #BREAD_CRUMBS
+ \*------------------------------------*/
+
+.breadcrumb {
+  background-color: #ffffff;
+  padding: 0;
+  margin-bottom: 0;
+}
+.breadcrumb > li a {
+  color: #1c84c6;
+}
+.breadcrumb > .active {
+  color: #1c84c6;
+}
+
+
+ /*------------------------------------*\
+     #LOGIN_PAGE
+ \*------------------------------------*/
+
+.smartcapture-login-page { background-color: #F4F6FA; }
+
+.loginscreen {
+  margin-top:40px;
+  width:640px;
+}
+
+.login-smartcapture-logo { width: 280px; }
+
+.smartcapture-login-page .alert {
+  margin-right: auto;
+  margin-left: auto;
+  width: 70%;
+}
+
+.smartcapture-login-page .alert-info { margin: 20px auto; }
+
+.smartcapture-login-page .alert a { text-decoration: underline; }
+
+.login-container {
+  background: #FFFFFF;
+  border:1px solid #EAEAEA;
+  box-shadow:          0 5px 5px -5px rgba(0,0,0,0.15);
+  -webkit-box-shadow:  0 5px 5px -5px rgba(0,0,0,0.15);
+  -moz-box-shadow:     0 5px 5px -5px rgba(0,0,0,0.15);
+  padding: 30px;
+}
+
+.login-site-creds { font-size: 12px; }
+
+#login-submit {
+  background-color: #9C8C8C;
+  border-color: #9C8C8C;
+  background-color: #c2c2c2;
+  border-color: #c2c2c2;
+}
+
+#login-submit:hover { background-color: #bababa; }
+
+.btn-info-login {
+  background-color: #0093D0;
+  border-color: #0093D0;
+  width: 100%;
+}
+
+.btn-info-login:hover {
+  background-color: #1a7bb9;
+  border-color: #1a7bb9;
+}
+
+.login-left,
+.login-center,
+.login-right {
+  float: left;
+}
+
+.login-left,
+.login-right {
+  width: 45%;
+}
+
+
+.login-center {
+  padding: 40px 0 0 0;
+  text-align: center;
+  width: 10%;
+}
+.login-center-reset-pass {
+  padding: 40px 0 0 0;
+  text-align: center;
+  width: 50%;
+  margin-left: 25%;
+}
+
+.login-title { font-size: 15px; }
+
+.logo-pfizer {
+  margin-right: 10px;
+  width: 55px;
+}
+
+.login-one-click-msg {
+  font-size: 12px;
+  margin-top: 10px;
+  padding-right: 30px;
+}
+
+.login-copyright {
+  font-size: 12px;
+  margin-top: 20px;
+}
+
+@media (max-width: 640px) {
+  .loginscreen {
+    margin-top:15px;
+    width: 100%;
+  }
+
+  .smartcapture-login-page .alert {
+    width: 90%;
+    font-size: 12px;
+  }
+
+  .login-left,
+  .login-center,
+  .login-right {
+    float: none;
+    display: block;
+    width: 100%;
+  }
+
+  .login-center {
+    border-top: 1px solid #EAEAEA;
+    border-bottom: 1px solid #EAEAEA;
+    margin: 15px 0;
+    padding: 3px 0;
+  }
+
+  #login-submit { width: 100%; }
+
+  .text-left { text-align: center; }
+
+  .login-one-click-msg { padding-right: 0; }
+}
+
+ /*------------------------------------*\
+     #TITLES_AND_PAGINATION
+ \*------------------------------------*/
+
+.top-title { padding: 15px 30px 20px 20px; }
+
+.pagination { margin: 5px 15px 5px 15px; }
