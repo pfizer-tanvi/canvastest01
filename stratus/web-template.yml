@@ -1,0 +1,783 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Build a Task Definition and deploy to docker ECS
+Mappings:
+  ShortenEnvNameForCFLimits:
+    production:
+      Name: prod
+    staging:
+      Name: stage
+    uat:
+      Name: uat
+  S3LogBuckets:
+    us-east-1:
+      BucketName: pfe-s3-access-logs
+    eu-west-1:
+      BucketName: pfe-s3-access-logs-eu-west-1
+  DeploymentSource:
+    us-east-1:
+      BucketName: det-cloudformation-backups-us-east-1
+    eu-west-1:
+      BucketName: det-cloudformation-backups
+Conditions:
+  IsPublicSite: !Equals
+    - !Ref PublicSite
+    - "yes"
+  IsProduction: !Equals
+    - !Ref AppEnv
+    - production
+  CreateAllResources: !Equals 
+    - !Ref AppEnv
+    - staging
+Parameters:
+  StratusCfnFnStackName:
+    Type: String
+    Default: stratus-cfn-fn
+    Description: Name of the CloudFormation stack that contains the Stratus CFN functions
+  Memory:
+    Type: Number
+    Default: "1024"
+    Description: Does it really need more megs?
+  EFSId:
+    Type: String
+    Default: "efs-id"
+    Description: EFS id
+  AppEnv:
+    Type: String
+    Description: defaults to staging
+    Default: staging
+    AllowedValues:
+      - production
+      - staging
+      - uat
+  PublicSite:
+    Type: String
+    Description: Can the site be accessed from the general internet (yes) or only from Pfizer network (no)
+    Default: "no"
+    AllowedValues:
+      - "yes"
+      - "no"
+  AppName:
+    Type: String
+    Description: will NOT include the APP_ENV so foo-staging would be foo
+    MinLength: 1
+  Version:
+    Type: String
+    Description: Helps with updating TargetGroups due to AWS limit just bump it up from 001
+    MinLength: 3
+    Default: "001"
+  UniqueDomainName:
+    Default: foo-qa.digitalpfizer.com
+    Type: String
+    Description: e.g. foo-qa.digitalpfizer.com
+  AdminDatabaseSecret:
+    Default: cat/admin/rds-cat-platform-staging
+    Type: String
+    Description: Location of secret for RDS access (cat/admin/rds-cat-platform-production)
+  AdminDatabaseSecretRegion:
+    Default: us-east-1
+    Type: String
+    Description: Region of RDS access secret
+  DesiredCount:
+    Type: Number
+    Description: Set this to 0 for 1st build after that leave at 1
+    Default: 0
+    MaxValue: 1
+  CognitoUserPoolId:
+    Type: String
+    Description: we default to stratus
+    Default: eu-west-1_XqKGA2Dyi
+  ECRTag:
+    Type: String
+    Description: This is the ecr tag with prefix uat_ production_ this is what Stratus will set staging will not needs this but we set it here
+    Default: latest
+  KmsMasterKeyId:
+    Type: String
+    Description: This is the make sure we can do SQS encryption default is dset ireland
+    Default: arn:aws:kms:eu-west-1:364215618558:key/a7db586c-e3f4-4813-8018-2f6f6c8f702c
+Resources:
+  AppUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub "svc-${AppName}-${AppEnv}"
+      Path: /
+  UserAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref AppUser
+  StackManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties: 
+      Description: !Sub "Managed policy for svc-${AppName}-${AppEnv}"
+      Users: 
+        - !Ref 'AppUser'
+      Path: /
+      PolicyDocument: 
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - ses:SendRawEmail
+              - ses:SendEmail
+            Resource:
+              - arn:aws:ses:us-east-1:364215618558:identity/pfizer.com
+            Effect: Allow
+          - Action:
+            - s3:ListBucket
+            Resource:
+              - !Sub "arn:aws:s3:::det-${AppName}"
+            Effect: Allow
+          - Action:
+              - "*"
+            Resource:
+              - !Sub "arn:aws:s3:::det-${AppName}/${AppEnv}/*"
+            Effect: Allow
+          - Action:
+              - s3:ListBucket
+            Resource:
+              - !Sub "arn:aws:s3:::det-${AppName}"
+            Effect: Allow
+          - Action:
+              - "*"
+            Resource:
+              - !Sub "arn:aws:s3:::det-${AppName}/*"
+            Effect: Allow
+          - Action:
+              - sns:*
+            Resource:
+              - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${AppName}-*-${AppEnv}"
+            Effect: Allow
+          - Action:
+              - sqs:*
+            Resource: !Sub "arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${AppName}-*-${AppEnv}"
+            Effect: Allow
+          - Action:
+              - kms:Decrypt
+            Resource: !Ref KmsMasterKeyId
+            Effect: Allow
+          - Action:
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchGetImage
+              - ecr:BatchCheckLayerAvailability
+              - ecr:PutImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+            Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${AppName}
+            Effect: Allow
+          - Effect: Allow
+            Action:
+              - logs:DescribeLogGroups
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - ssmmessages:CreateControlChannel
+              - ssmmessages:CreateDataChannel
+              - ssmmessages:OpenControlChannel
+              - ssmmessages:OpenDataChannel
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - logs:DescribeLogGroups
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:DescribeLogStreams
+              - logs:PutLogEvents
+            Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${AppName}-${AppEnv}:*
+          - Effect: Allow
+            Action:
+              - ecs:ExecuteCommand
+            Condition:
+              StringEquals:
+                ecs:container-name: !Sub "${AppName}-app-${AppEnv}"
+            Resource:
+              - !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluser/cat-platform-${AppEnv}
+  ECR:
+    Type: AWS::ECR::Repository
+    Condition: CreateAllResources
+    Properties:
+      RepositoryName: !Ref AppName
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub svc-${AppName}-${AppEnv}-execution-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub svc-${AppName}-${AppEnv}-task-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - !Ref StackManagedPolicy
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Memory: !Ref Memory
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: !Ref Cpu
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: !Sub "${AppName}-app-${AppEnv}"
+          Essential: true
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AppName}:${ECRTag}"
+          PortMappings:
+            - ContainerPort: 443
+          MountPoints:
+            - SourceVolume: shared
+              ContainerPath: /opt/shared
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Sub '${AppName}-app-${AppEnv}'
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: "ecs"
+      Volumes:
+        - Name: shared
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref EFSId
+  TaskDefinitionAppLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '${AppName}-app-${AppEnv}'
+      RetentionInDays: 30
+  TaskDefinitionAppLogStream:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn: !GetAtt LogsStreamingFunction.Arn
+      FilterPattern: ''
+      LogGroupName: !Sub '${AppName}-app-${AppEnv}'
+    DependsOn:
+      - TaskDefinitionAppLogGroup
+  ClusterService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Sub '{{resolve:ssm:/cat/core/${AWS::Region}/${AppEnv}/ClusterName}}'
+      ServiceName: !Sub "${AppName}-${AppEnv}-${Version}"
+      SchedulingStrategy: REPLICA
+      DesiredCount: !Ref DesiredCount
+      LoadBalancers:
+        - ContainerName: !Sub "${AppName}-${AppEnv}"
+          ContainerPort: 443
+          TargetGroupArn: !Ref TargetGroupSSL
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      TaskDefinition: !Ref TaskDefinition
+    DependsOn:
+      - ListenerRuleHttps
+  TargetGroupSSL:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '20'
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: HTTPS
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 4
+      Matcher:
+        HttpCode: "200,403,404,400,401,301,302"
+      Name: !Sub
+        - "${AppName}-${ShortenENV}-s-${Version}"
+        - ShortenENV: !FindInMap
+            - ShortenEnvNameForCFLimits
+            - !Ref AppEnv
+            - Name
+      Port: 443
+      Protocol: HTTPS
+      UnhealthyThresholdCount: 2
+      VpcId: !Sub '{{resolve:ssm:/cat/core/${AWS::Region}/${AppEnv}/VPCID}}'
+  ListenerRuleHttp:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: redirect
+          RedirectConfig:
+            Host: !Ref UniqueDomainName
+            Protocol: HTTPS
+            Port: '443'
+            StatusCode: HTTP_301
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref UniqueDomainName
+      ListenerArn: !If
+        - IsPublicSite
+        - !Sub '{{resolve:ssm:/cat/core/${AWS::Region}/${AppEnv}/ListenerNonSSL}}'
+        - !Sub '{{resolve:ssm:/cat/core/${AWS::Region}/${AppEnv}/ListenerNonSSLPrivate}}'
+      Priority: !GetAtt ALBPriority.priority
+    DependsOn:
+      - TargetGroupSSL
+  ListenerRuleHttps:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupSSL
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref UniqueDomainName
+      ListenerArn: !If
+        - IsPublicSite
+        - !Sub '{{resolve:ssm:/cat/core/${AWS::Region}/${AppEnv}/ListenerSSL}}'
+        - !Sub '{{resolve:ssm:/cat/core/${AWS::Region}/${AppEnv}/ListenerSSLPrivate}}'
+      Priority: !GetAtt ALBPriority.priority
+  Route53:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Sub '{{resolve:ssm:/cat/core/${AWS::Region}/${AppEnv}/HostedZone}}'
+      Comment: DNS For the Docker Image
+      Name: !Ref UniqueDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !If
+          - IsPublicSite
+          - !Sub '{{resolve:ssm:/cat/core/${AWS::Region}/${AppEnv}/UATALBDNSName}}'
+          - !Sub '{{resolve:ssm:/cat/core/${AWS::Region}/${AppEnv}/ALBDNSNamePrivate}}'
+        HostedZoneId: Z32O12XQLNTSW2
+  S3Bucket:
+    Type: Pfizer::StratusDevOps::S3::MODULE
+    Properties:
+      BucketName: !Sub "det-${AppName}"
+      AccessLogBucketName: !FindInMap [S3LogBuckets, !Ref "AWS::Region", BucketName]
+  SNSDefault:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${AppName}-default-${AppEnv}"
+  SQSDefaultActive:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 43200
+      QueueName: !Sub "${AppName}-default-${AppEnv}"
+      KmsMasterKeyId: !Ref KmsMasterKeyId
+      KmsDataKeyReusePeriodSeconds: 500
+  SecretCore:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "cat/${AppName}-${AppEnv}/core"
+      Description: !Sub "Core secrets for ${AppName}-${AppEnv}"
+      SecretString: !Sub |
+        APP_ENV="${AppEnv}"
+        APP_NAME="${AppName}"
+        APP_URL="https://${UniqueDomainName}"
+        APP_KEY="${AppKeyCreator.app_key}"
+        APP_DEBUG="false"
+        DB_CONNECTION="mysql"
+        DB_USERNAME="${DBCreator.db_username}"
+        DB_PASSWORD="${DBCreator.db_password}"
+        DB_DATABASE="${DBCreator.db_name}"
+        DB_HOST="${DBCreator.db_host}"
+        FILESYSTEM_DRIVER="s3"
+        QUEUE_DRIVER="sqs"
+        AWS_ACCESS_KEY_ID="${UserAccessKey}"
+        AWS_SECRET_ACCESS_KEY="${UserAccessKey.SecretAccessKey}"
+        AWS_REGION="${AWS::Region}"
+        ACCOUNT_NAME="det"
+        ACCOUNT_ID="${AWS::AccountId}"
+        COGNITO_KEY="${CognitoClient}"
+        COGNITO_SECRET="${CognitoClientSecretFinder.Secret}"
+        COGNITO_ENDPOINT="https://cat-platform.auth.eu-west-1.amazoncognito.com"
+        COGNITO_REDIRECT_URI="https://${UniqueDomainName}/auth/cognito"
+        PUSHER_APP_ID="${PusherKeysGetter.PusherAppId}"
+        PUSHER_APP_KEY="${PusherKeysGetter.PusherAppKey}"
+        PUSHER_APP_SECRET="${PusherKeysGetter.PusherAppSecret}"
+        PUSHER_APP_CLUSTER="${PusherKeysGetter.PusherAppCluster}"
+        MIX_PUSHER_APP_KEY="${PusherKeysGetter.PusherAppKey}"
+        MIX_PUSHER_APP_CLUSTER="${PusherKeysGetter.PusherAppCluster}"
+  SecretAdditions:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "cat/${AppName}-${AppEnv}/additions"
+      Description: !Sub "Additional secrets for ${AppName}-${AppEnv}"
+      SecretString: 'FOO="test"'
+  CognitoLocalClient:
+    Type: AWS::Cognito::UserPoolClient
+    Condition: CreateAllResources
+    Properties:
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - email
+        - openid
+        - profile
+      AllowedOAuthFlowsUserPoolClient: true
+      CallbackURLs:
+        - !Sub "https://${AppName}.test/auth/cognito"
+      ClientName: !Sub "${AppName}-local"
+      DefaultRedirectURI: !Sub "https://${AppName}.test/auth/cognito"
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      GenerateSecret: true
+      LogoutURLs:
+        - !Sub "https://${AppName}.test/auth/cognito/logout"
+      PreventUserExistenceErrors: LEGACY
+      ReadAttributes:
+        - email
+        - custom:guid
+        - custom:ntid
+        - custom:group
+        - custom:grouplist
+        - custom:family_name
+        - custom:name
+      RefreshTokenValidity: 3500
+      SupportedIdentityProviders:
+        - !If
+          - IsProduction
+          - pfizer-saml-production
+          - pfizer-saml
+      UserPoolId: !Ref CognitoUserPoolId
+      WriteAttributes:
+        - email
+        - custom:guid
+        - custom:ntid
+        - custom:group
+        - custom:grouplist
+        - custom:family_name
+        - custom:name
+  CognitoClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - email
+        - openid
+        - profile
+      AllowedOAuthFlowsUserPoolClient: true
+      CallbackURLs:
+        - !Sub "https://${UniqueDomainName}/auth/cognito"
+      ClientName: !Sub "${AppName}-${AppEnv}"
+      DefaultRedirectURI: !Sub "https://${UniqueDomainName}/auth/cognito"
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      GenerateSecret: true
+      LogoutURLs:
+        - !Sub "https://${UniqueDomainName}/auth/cognito/logout"
+      PreventUserExistenceErrors: LEGACY
+      ReadAttributes:
+        - email
+        - custom:guid
+        - custom:ntid
+        - custom:group
+        - custom:grouplist
+        - custom:family_name
+        - custom:name
+      RefreshTokenValidity: 3500
+      SupportedIdentityProviders:
+        - !If
+          - IsProduction
+          - pfizer-saml-production
+          - pfizer-saml
+      UserPoolId: eu-west-1_XqKGA2Dyi
+      WriteAttributes:
+        - email
+        - custom:guid
+        - custom:ntid
+        - custom:group
+        - custom:grouplist
+        - custom:family_name
+        - custom:name
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Condition: CreateAllResources
+    Properties:
+      Name: !Sub "${AppName}-${AppEnv}"
+      RoleArn: !Sub '{{resolve:ssm:/cat/core/${AWS::Region}/${AppEnv}/PipelineRole}}'
+      Stages:
+        - Name: Source
+          Actions:
+            - InputArtifacts: []
+              Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: "1"
+                Provider: S3
+              OutputArtifacts:
+                - Name: SourceArtifacts
+              Configuration:
+                PollForSourceChanges: false
+                S3Bucket: !Sub "det-${AppName}"
+                S3ObjectKey: provision/staging/latest.zip
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: "1"
+                Provider: CodeBuild
+              InputArtifacts:
+                - Name: SourceArtifacts
+              OutputArtifacts:
+                - Name: BuildArtifacts
+              Configuration:
+                ProjectName: !Ref CodeBuildDeploySite
+              RunOrder: 1
+            - Name: UATBuild
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: "1"
+                Provider: CodeBuild
+              InputArtifacts:
+                - Name: SourceArtifacts
+              OutputArtifacts:
+                - Name: UATBuildArtifacts
+              Configuration:
+                ProjectName: !Ref CodeBuildDeployUATSite
+              RunOrder: 1
+            - Name: ProductionBuild
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: "1"
+                Provider: CodeBuild
+              InputArtifacts:
+                - Name: SourceArtifacts
+              OutputArtifacts:
+                - Name: ProdBuildArtifacts
+              Configuration:
+                ProjectName: !Ref CodeBuildDeployProductionSite
+              RunOrder: 1
+        - Name: Deploy
+          Actions:
+            - Name: UpdateService
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: "1"
+                Provider: ECS
+              InputArtifacts:
+                - Name: SourceArtifacts
+              Configuration:
+                ClusterName: !Sub '{{resolve:ssm:/cat/core/${AWS::Region}/${AppEnv}/ClusterName}}'
+                FileName: imagedefinitions.json
+                ServiceName: !Sub "${AppName}-${AppEnv}-${Version}"
+              RunOrder: 1
+      ArtifactStore:
+        Type: S3
+        Location: !Sub "det-${AppName}"
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Condition: CreateAllResources
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: codebuild-service
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: "*"
+                Resource: "*"
+  CodeBuildDeploySite:
+    Type: AWS::CodeBuild::Project
+    Condition: CreateAllResources
+    Properties:
+      Name: !Sub "${AppName}-${AppEnv}"
+      Description: Deploy to ECR
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:4.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AppEnv
+            Value: !Ref AppEnv
+          - Name: AppName
+            Value: !Ref AppName
+          - Name: AWSRegion
+            Value: !Ref AWS::Region
+          - Name: AWSAccountId
+            Value: !Ref AWS::AccountId
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub "buildspec.${AppEnv}.yaml"
+      TimeoutInMinutes: 10
+  CodeBuildDeployUATSite:
+    Type: AWS::CodeBuild::Project
+    Condition: CreateAllResources
+    Properties:
+      Name: !Sub "${AppName}-uat"
+      Description: Deploy to ECR
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        PrivilegedMode: true
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:4.0
+        EnvironmentVariables:
+          - Name: AppEnv
+            Value: uat
+          - Name: AppName
+            Value: !Ref AppName
+          - Name: AWSRegion
+            Value: !Ref AWS::Region
+          - Name: AWSAccountId
+            Value: !Ref AWS::AccountId
+          - Name: ECRTag
+            Value: !Ref ECRTag
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspec.uat.yaml
+      TimeoutInMinutes: 10
+  CodeBuildDeployProductionSite:
+    Type: AWS::CodeBuild::Project
+    Condition: CreateAllResources
+    Properties:
+      Name: !Sub "${AppName}-production"
+      Description: Deploy site to S3
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        PrivilegedMode: true
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:4.0
+        EnvironmentVariables:
+          - Name: AppEnv
+            Value: production
+          - Name: AppName
+            Value: !Ref AppName
+          - Name: AWSRegion
+            Value: !Ref AWS::Region
+          - Name: AWSAccountId
+            Value: !Ref AWS::AccountId
+          - Name: ECRTag
+            Value: !Ref ECRTag
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspec.production.yaml
+      TimeoutInMinutes: 10
+
+  CognitoClientSecretFinder:
+    Type: AWS::CloudFormation::CustomResource
+    Version: "1.0"
+    Properties:
+      ServiceToken: Fn::ImportValue: 
+        !Sub ${StratusCfnFnStackName}-production-function-cognito-secret
+      CognitoClient: !Ref CognitoClient
+      CognitoUserPoolId: !Ref CognitoUserPoolId
+      AppEnv: !Ref AppEnv
+      AppName: !Ref AppName
+
+  LocalCognitoClientSecretFinder:
+    Type: AWS::CloudFormation::CustomResource
+    Condition: CreateAllResources
+    Version: "1.0"
+    Properties:
+      ServiceToken: Fn::ImportValue: 
+        !Sub ${StratusCfnFnStackName}-production-function-cognito-secret
+      CognitoClient: !Ref CognitoLocalClient
+      CognitoUserPoolId: !Ref CognitoUserPoolId
+      AppEnv: !Ref AppEnv
+      AppName: !Ref AppName
+
+  ALBPriority:
+    Type: AWS::CloudFormation::CustomResource
+    Version: "1.0"
+    Properties:
+      ServiceToken: Fn::ImportValue: 
+        !Sub ${StratusCfnFnStackName}-production-function-alb-priority-finder
+      AppEnv: !Ref AppEnv
+      AppName: !Ref AppName
+
+  DBCreator:
+    Type: AWS::CloudFormation::CustomResource
+    Version: "1.0"
+    Properties:
+      ServiceToken: Fn::ImportValue: 
+        !Sub ${StratusCfnFnStackName}-production-function-database-creator
+      AppEnv: !Ref AppEnv
+      AppName: !Ref AppName
+      Secret: !Ref AdminDatabaseSecret
+      SecretRegion: !Ref AdminDatabaseSecretRegion
+
+  PusherKeysGetter:
+    Type: AWS::CloudFormation::CustomResource
+    Version: "1.0"
+    Properties:
+      ServiceToken: Fn::ImportValue: 
+        !Sub ${StratusCfnFnStackName}-production-function-pusher-keys-getter
+      AppEnv: !Ref AppEnv
+      AppName: !Ref AppName
+
+  PusherKeysGetterLocal:
+    Condition: CreateAllResources
+    Type: AWS::CloudFormation::CustomResource
+    Version: "1.0"
+    Properties:
+      ServiceToken: Fn::ImportValue: 
+        !Sub ${StratusCfnFnStackName}-production-function-pusher-keys-getter
+      AppEnv: local
+      AppName: !Ref AppName
+
+  AppKeyCreator:
+    Type: AWS::CloudFormation::CustomResource
+    Version: "1.0"
+    Properties:
+      ServiceToken: Fn::ImportValue: 
+        !Sub ${StratusCfnFnStackName}-production-function-appkey-creator
+      AppEnv: !Ref AppEnv
+      AppName: !Ref AppName
+
+Outputs:
+  DomainName:
+    Value: !Sub "https://${UniqueDomainName}"
+    Description: Domain Name
+
+  LocalCognitoKey:
+    Condition: CreateAllResources
+    Description: Local Cognito Client
+    Value: !Ref CognitoLocalClient
+
+  LocalCognitoSecret:
+    Condition: CreateAllResources
+    Description: Local Cognito Client Secret
+    Value: !GetAtt LocalCognitoClientSecretFinder.Secret
+
+  LocalPusherKeys:
+    Condition: CreateAllResources
+    Value: !Join
+      - ','
+      -
+        - !Join ["app id: ", !GetAtt PusherKeysGetterLocal.PusherAppId]
+        - !Join ["app key: ", !GetAtt PusherKeysGetterLocal.PusherAppKey]
+        - !Join ["app secret: ", !GetAtt PusherKeysGetterLocal.PusherAppSecret]
+        - !Join ["app cluster: ", !GetAtt PusherKeysGetterLocal.PusherAppCluster]
