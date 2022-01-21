@@ -1,0 +1,86 @@
+name: Redeploy staging
+
+on:
+  workflow_dispatch:
+    
+jobs:
+  deploy:
+    runs-on: ubuntu-20.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: "Stratus Pipeline: Clone"
+        uses: actions/checkout@v2
+        with:
+          repository: pfizer/stratus-ci-scripts
+          ref: mainline
+          token: ${{ secrets.STRATUS_GITHUB_TOKEN }}
+          path: stratus_pipeline
+
+      - name: Setup PHP with PECL extension
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "7.4"
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: "3.7"
+
+      - name: AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.STRATUS_AWS_LIMITED_KEY }}
+          aws-secret-access-key: ${{ secrets.STRATUS_AWS_LIMITED_SECRET }}
+          aws-region: eu-west-1
+
+      - name: Install Dependencies
+        id: install-prod-dependencies
+        run: |
+          composer self-update --2
+          composer config -g github-oauth.github.com ${{ secrets.STRATUS_GITHUB_TOKEN }}
+          composer install --no-dev --prefer-dist --no-interaction
+          export APP_ENV=production
+          npm ci
+          npm run production
+
+      - name: Zip
+        run: |
+          printf '[{"name":"${{ secrets.APP_NAME }}-staging","imageUri":"364215618558.dkr.ecr.eu-west-1.amazonaws.com/${{ secrets.APP_NAME }}:latest"}]'  > imagedefinitions.json
+          zip --quiet -r latest ./
+
+      - name: Upload artifact to AWS
+        run: |
+          aws --region=eu-west-1 s3 cp latest.zip s3://det-${{ secrets.APP_NAME }}/provision/staging/latest.zip
+
+      - name: Monitor pipeline
+        id: start-pipeline
+        run: |
+          pip install boto3
+          if [ -z "${{ secrets.PIPELINE_NAME }}" ]
+          then
+            PIPELINE_NAME="${{ secrets.APP_NAME }}-staging"
+          else
+            PIPELINE_NAME="${{ secrets.PIPELINE_NAME }}"
+          fi
+          python ./stratus_pipeline/common/deploy/check_pipeline.py $PIPELINE_NAME ${{ secrets.AWS_REGION }}
+
+  failed_build_get_errors:
+    runs-on: ubuntu-20.04
+    defaults:
+      run:
+        shell: bash
+    needs: deploy
+    if: failure()
+    steps:
+      - name: Get codebuild event logs
+        id: failed-codebuild-logs
+        uses: stumason/codebuild-logs@v1
+        env:
+          aws-access-key-id: ${{ secrets.STRATUS_AWS_LIMITED_KEY }}
+          aws-secret-access-key: ${{ secrets.STRATUS_AWS_LIMITED_SECRET }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          codebuild-project-name: ${{ secrets.APP_NAME }}-staging
