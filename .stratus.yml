@@ -1,0 +1,5 @@
+version: 0.0.1
+build:
+    base_image: cat-core-docker
+    base_tag: php_74b_min_20211117
+    new_relic_php_agent_url: https://download.newrelic.com/php_agent/release/newrelic-php5-9.18.1.303-linux.tar.gz

@@ -1,0 +1,33 @@
+version: 0.2
+phases:
+    pre_build:
+        commands:
+            - wget https://github.com/mikefarah/yq/releases/download/v4.13.3/yq_linux_386.tar.gz -O - | tar xz && mv yq_linux_386 /usr/bin/yq
+            - aws secretsmanager get-secret-value --secret-id "cat/${AppName}-${AppEnv}/core" --query SecretString --output text --region ${AWSRegion} > .env
+            - aws secretsmanager get-secret-value --secret-id "cat/${AppName}-${AppEnv}/additions" --query SecretString --output text --region ${AWSRegion} >> .env
+            - sed -e "s/APP_ENV/${AppEnv}/g" -e "s/APP_NAME/${AppName}/g"  filebeat-template.yml > filebeat.yml
+            - cp supervisor-${AppEnv}.ini supervisor.ini
+            - cp default-${AppEnv}.conf default.conf
+    build:
+        commands:
+            - aws ecr get-login-password --region ${AWSRegion} | docker login --username AWS --password-stdin ${AWSAccountId}.dkr.ecr.${AWSRegion}.amazonaws.com
+            - |
+                DOCKER_CORE_IMAGE=$(yq e '.build.base_image' ./.stratus.yml)
+                DOCKER_CORE_TAG=$(yq e '.build.base_tag' ./.stratus.yml)
+                PHP_AGENT_URL=$(yq e '.build.new_relic_php_agent_url' ./.stratus.yml)
+                if [ $AppEnv = "staging" ]; then
+                    APP_DOCKER_TAG=latest
+                else
+                    APP_DOCKER_TAG=${AppEnv}_$(git rev-parse HEAD)
+                fi
+            - |
+                docker build -t ${AppName} \
+                    --build-arg FROM_IMAGE=${AWSAccountId}.dkr.ecr.${AWSRegion}.amazonaws.com/${DOCKER_CORE_IMAGE}:${DOCKER_CORE_TAG} \
+                    --build-arg APP_ENV=${AppEnv} \
+                    --build-arg APP_NAME=${AppName} \
+                    --build-arg NEW_RELIC_LICENSE_KEY=$(aws ssm get-parameter --name "/cat/cfn-params/${AWSAccountId}/${AWSRegion}/prod/NewRelicKey" --region ${AWSRegion} --with-decryption --query Parameter.Value --output text) \
+                    --build-arg PHP_AGENT_URL=$PHP_AGENT_URL .
+            - docker tag ${AppName}:latest ${AWSAccountId}.dkr.ecr.${AWSRegion}.amazonaws.com/${AppName}:${APP_DOCKER_TAG}
+            - docker push ${AWSAccountId}.dkr.ecr.${AWSRegion}.amazonaws.com/${AppName}:${APP_DOCKER_TAG}
+artifacts:
+    files: imagedefinitions.json
