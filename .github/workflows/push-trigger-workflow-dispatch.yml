@@ -1,0 +1,29 @@
+name: push-trigger-workflow-dispatch
+
+on:
+  push:
+    branches:
+      - "mainline"
+    tags-ignore:
+      - "*.*"
+
+jobs:
+  mainline-trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Mainline Trigger"
+
+      - name: Invoke workflow and wait
+        id: trigger-step
+        uses: convictional/trigger-workflow-and-wait@v1.5.0
+        with:
+          owner: ${{ github.repository_owner }}
+          repo: ${{ github.event.repository.name }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow_file_name: ci-web-php.yml
+          ref: mainline
+          wait_interval: 30
+
+      - name: Output the result
+        if: always()
+        run: echo ${{ steps.trigger-step.outputs.workflow-conclusion }}

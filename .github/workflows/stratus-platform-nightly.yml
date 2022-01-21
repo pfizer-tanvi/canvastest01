@@ -1,0 +1,94 @@
+name: Stratus Nightly Update
+
+on:
+  schedule:
+    - cron:  '0 3 * * *'
+
+jobs:
+  update_ci_workflow_if_required:
+    runs-on: ubuntu-20.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: 'Clone Stratus platform backbone'
+        uses: actions/checkout@v2
+        with:
+          repository: pfizer/stratus-ci-scripts
+          token: ${{ secrets.STRATUS_GITHUB_TOKEN }}
+          path: stratus_backbone
+          ref: dependabot
+
+      - name: 'Check relevance'
+        id: diff
+        run: |
+          # Allow `updater.sh` to continue after exiting with non-zero.
+          \set +e
+          # Count the number of fails.
+          FAILS=0
+          # The list of files to keep in sync.
+          # Format: `/path/to/source/dir||/path/to/target/dir||filename` (double-pipe delimited).
+          MAPPING=(
+            "./stratus_backbone||./.github/workflows||ci-${{ secrets.STACK_TYPE }}-${{ secrets.STACK_LANGUAGE }}.yml"
+            "./stratus_backbone||./.github/workflows||stratus-platform-nightly.yml"
+          )
+
+          for ITEM in "${MAPPING[@]}"; do
+            # Creates an array of 5 items:
+            # - 0: source dir;
+            # - 1: empty;
+            # - 2: target dir;
+            # - 3: empty;
+            # - 4: filename;
+            IFS='||' \read -ra SOURCE <<< "$ITEM"
+
+            if ! ./stratus_backbone/common/scripts/updater.sh file "${SOURCE[0]}/${SOURCE[4]}" "${SOURCE[2]}/${SOURCE[4]}"; then
+              (( FAILS++ ))
+            fi
+          done
+
+          if [[ $FAILS -gt 0 ]]; then
+            # Remove the backbone before creating a PR.
+            \rm -rf ./stratus_backbone/
+            # Fail to go to the PR creation.
+            \exit 1
+          fi
+
+      - name: Import GPG key
+        id: import_gpg
+        if: ${{ failure() }}
+        uses: crazy-max/ghaction-import-gpg@v2
+        with:
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.STRATUS_CI_GPG_KEY }}
+          PASSPHRASE: ${{ secrets.STRATUS_CI_GPG_PHRASE }}
+
+      - name: 'Create pull request'
+        id: pr
+        if: ${{ failure() }}
+        uses: peter-evans/create-pull-request@v3
+        with:
+          token: ${{ secrets.STRATUS_GITHUB_TOKEN }}
+          commit-message: '[NO-JIRA] Automated Stratus platform update'
+          committer: 'Stratus CI Bot <alfred.nutile@pfizer.com>'
+          author: 'Stratus CI Bot <alfred.nutile@pfizer.com>'
+          signoff: false
+          branch: update-ci
+          delete-branch: true
+          title: '[NO-JIRA]: Automated Stratus platform CI/CD update'
+          body: |
+            ### Automated Stratus platform CI/CD update
+
+            If this PR has successfully passed your CI workflow checks (ci-${{ secrets.STACK_TYPE }}-${{ secrets.STACK_LANGUAGE }}.yml - build_and_test), then go ahead and merge this PR.
+
+            If the PR has failed, pleasse let the Stratus team know.
+
+            `Created by the ./github/worflows/stratus-platform-nightly.yml workflow.`
+          labels: |
+            automated pr
+          assignees: stumason
+          reviewers: stumason
