@@ -1,0 +1,24 @@
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'The ENV for the stack, i.e. production, staging, uat, etc.'
+        required: true
+        default: 'staging'
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
+        with:
+          python-version: '3.8'
+      - uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.CI_USER }}
+          aws-secret-access-key: ${{ secrets.CI_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # deploy the env
+      - run: python /app/stratus/nimbus.py

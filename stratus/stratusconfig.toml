@@ -1,0 +1,27 @@
+version = 0.1
+
+[default]
+template_file = "STACK_TEMPLATE"
+stack_name = "STACK_NAME"
+region = "AWS_REGION"
+capabilities = ["CAPABILITY_IAM", "CAPABILITY_NAMED_IAM"]
+stack_id = ""
+
+[default.tags]
+environment="APP_ENV" 
+application="APP_NAME" 
+billing_ref="BILLING_REF" 
+parent_project="PARENT_PROJECT" 
+key_contact="KEY_CONTACT" 
+CostCenterID="COST_CENTRE"
+
+[default.parameters]
+AppEnv="APP_ENV"
+AppName="APP_NAME" 
+PublicSite="PUBLIC_SITE" 
+Version="TASK_VERSION" 
+UniqueDomainName="DOMAIN_NAME" 
+Memory="MEMORY" 
+CognitoUserPoolId="USER_POOL" 
+DesiredCount="DESIRED_COUNT" 
+KmsMasterKeyId="KMS_KEY"

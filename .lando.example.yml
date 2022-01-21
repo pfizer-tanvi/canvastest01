@@ -1,0 +1,57 @@
+###
+# If you would like to use lando for local development ediit this file
+# and copy it to .lando.yml in the root of your Laravel project.
+####
+
+# Change this to your app name.
+name: YOUR_APP_NAME
+recipe: laravel
+
+config:
+  webroot: public
+  database: mariadb:10.3
+  php: 7.4
+  via: nginx:1.17
+
+env_file:
+  - .env.lando
+
+# Chane this URL to match YOUR_APP_NAME.
+proxy:
+  appserver_nginx:
+    - YOUR_APP_NAME.test
+
+##
+# Caveat: to install new dependencies preface commansds w/ lando, i.e.
+#   `lando npm install BLAH`
+#   `lando composer require BAR`
+#
+# @see https://docs.lando.dev/config/performance.html#configuration
+##
+excludes:
+  - vendor
+  - node_modules
+
+services:
+  appserver:
+    ssl: true
+    sslExpose: true
+    build:
+      - composer install
+
+  node:
+    type: node:14
+    build:
+      - npm install
+      - npm run dev
+
+tooling:
+  yarn:
+    service: node
+    cmd: yarn
+  npm:
+    service: node
+    cmd: npm
+  watch:
+    service: node
+    cmd: npm run watch
