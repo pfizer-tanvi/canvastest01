@@ -1,0 +1,26 @@
+[
+    {
+        "Key": "application",
+        "Value": "stratus-core-laravel"
+    },
+    {
+        "Key": "billing_ref",
+        "Value": "CLDAPP-STRATUS-CORE"
+    },
+    {
+        "Key": "parent_project",
+        "Value": "CLDAPP"
+    },
+    {
+        "Key": "key_contact",
+        "Value": "Jamie Hook"
+    },
+    {
+        "Key": "CostCenterID",
+        "Value": "0002321520"
+    },
+    {
+        "Key": "environment",
+        "Value": "staging"
+    }
+]
