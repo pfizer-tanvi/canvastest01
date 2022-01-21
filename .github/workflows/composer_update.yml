@@ -1,0 +1,66 @@
+###
+# Goal is to allow a composer update to be triggered via and API request using
+# https://help.github.com/en/actions/reference/events-that-trigger-workflows#external-events-repository_dispatch
+# When triggered it will
+# Start an action
+# Checkout the code
+# Install and run composer update
+# Make branch and commit to trigger Travis
+# Wait for Travis to finish running to merge PR if all is good
+###
+name: composer-update
+# soon it will not be on push but on repository_dispatch
+on:
+  repository_dispatch:
+    types: run-composer
+jobs:
+  run-composer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 1
+
+      - name: Prepare Laravel Application
+        run: cp .env.travis .env
+
+      - name: Composer dependencies and update
+        run: |
+          curl -O https://get.sensiolabs.org/security-checker.phar
+          composer config -g github-oauth.github.com ${{ secrets.ACCESS_TOKEN }}
+          composer update --prefer-dist --no-interaction
+          php security-checker.phar security:check -n composer.lock
+
+      - name: create-pr
+        uses: gr2m/create-or-update-pull-request-action@v1.x
+        with:
+          title: "[Snyk] - Composer Update"
+          body: "Created by Stratus Security"
+          branch: snyk-${{ github.sha }}
+          commit-message: "if TravisCI passes it should auto merge"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "Add label"
+        uses: actions/github-script@v2
+        with:
+          github-token: ${{secrets.ACCESS_TOKEN}}
+          script: |
+            github.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open"
+            }).then(response => {
+                response.data.forEach(item => {
+                  if(item.title.includes("Composer Update")) {
+                    github.pulls.createReview({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      pull_number: item.number,
+                      body: "Composer lockfile update",
+                      event: "APPROVE"
+                    })
+                  }
+                })
+            });
