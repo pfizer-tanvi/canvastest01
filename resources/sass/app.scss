@@ -1,0 +1,40 @@
+// Fonts
+@import url("https://fonts.googleapis.com/css?family=Raleway:300,400,600");
+// Variables
+@import "variables";
+// Bootstrap
+@import '~bootstrap/scss/bootstrap';
+@import "~font-awesome/css/font-awesome";
+@import "./custom/jquery-ui-dialog.css";
+@import "./custom/theme.css";
+
+// @import '../sass/custom/helix';
+// @import '../sass/custom/helix-bootstrap';
+
+.navbar-laravel {
+    background-color: #fff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+}
+
+.main.content {
+    margin-top: 50px;
+}
+
+.div-custom {
+    margin-left: 5%;
+    margin-right: 5%;
+    background-color: rgba(255, 255, 255, 1);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    box-shadow: 0px 20px 40px 0px rgba(0, 0, 0, 0.1)
+}
+
+.login-card {
+    min-height: 250px;
+}
+
+.footer-div {
+    width: 100%;
+    text-align: center;
+    color: #676a6c;
+}
