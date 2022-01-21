@@ -1,0 +1,464 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Build a PHP Fargate Worker Task Definition and deploy to ECS
+Mappings:
+  'Fn::Transform':
+    Name: 'AWS::Include'
+    Parameters:
+      Location: !Sub s3://stratus-partials-${AWS::AccountId}/mappings/stratus-sam-mappings-${AWS::AccountId}.yaml
+Conditions:
+  FullResourceBuild: !Equals
+    - !Ref AppEnv
+    - staging
+Parameters:
+  AppEnv:
+    Type: String
+    Description: defaults to staging
+    Default: staging
+    AllowedValues:
+      - staging
+      - production
+      - uat
+  AppName:
+    Type: String
+    Description: will NOT include the APP_ENV so foo-staging would be foo
+    MinLength: 1
+  AppKey:
+    Type: String
+    Description: Laravel app key
+    MinLength: 1
+    NoEcho: true
+  KmsMasterKeyId:
+    Type: String
+    Description: This is the make sure we can do SQS encryption default is dset ireland
+    Default: arn:aws:kms:eu-west-1:364215618558:key/a7db586c-e3f4-4813-8018-2f6f6c8f702c
+  ECRTag:
+    Type: String
+    Default: latest
+    Description: This is the ecr tag with prefix uat_ production_ this is what Stratus will set staging will not needs this but we set it here
+Outputs:
+  SecretKeyForAppUser:
+    Description: Secret for User you only get this on creation of user
+    Value:
+      Fn::GetAtt:
+      - UserAccessKey
+      - SecretAccessKey
+Resources:
+  AppGroup:
+    Type: AWS::IAM::Group
+  AppUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName:
+        Fn::Sub: svc-${AppName}-${AppEnv}
+      Path: "/"
+    DependsOn:
+    - AppGroup
+  UserAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName:
+        Ref: AppUser
+  AddUserToGroup:
+    Type: AWS::IAM::UserToGroupAddition
+    Properties:
+      GroupName:
+        Ref: AppGroup
+      Users:
+      - Ref: AppUser
+  ECR:
+    Type: AWS::ECR::Repository
+    Condition: FullResourceBuild
+    Properties:
+      RepositoryName:
+        Fn::Sub: "${AppName}"
+      RepositoryPolicyText:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: AllowPushPull
+          Effect: Allow
+          Principal:
+            AWS:
+            - Fn::GetAtt:
+              - AppUser
+              - Arn
+          Action:
+          - ecr:BatchCheckLayerAvailability
+          - ecr:BatchGetImage
+          - ecr:CompleteLayerUpload
+          - ecr:GetDownloadUrlForLayer
+          - ecr:InitiateLayerUpload
+          - ecr:PutImage
+          - ecr:UploadLayerPart
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/ecs/${AppName}-${AppEnv}"
+      RetentionInDays: 1
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family:
+        Fn::Sub: "${AppName}-${AppEnv}"
+      RequiresCompatibilities:
+      - FARGATE
+      Cpu: '256'
+      ExecutionRoleArn: arn:aws:iam::364215618558:role/ecsTaskExecutionRole
+      Memory: '512'
+      NetworkMode: awsvpc
+      TaskRoleArn: arn:aws:iam::364215618558:role/cat-alb-task-iam-v2
+      ContainerDefinitions:
+      - Name:
+          Fn::Sub: "${AppName}-${AppEnv}"
+        Command:
+        - php
+        - "/app/artisan"
+        - inspire
+        Image:
+          Fn::Sub: "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AppName}:${ECRTag}"
+        Memory: 512
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group:
+              Ref: LogGroup
+            awslogs-region:
+              Ref: AWS::Region
+            awslogs-stream-prefix: aws/ecs
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Condition: FullResourceBuild
+    Properties:
+      BucketName:
+        Fn::Sub: det-${AppName}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LoggingConfiguration:
+        DestinationBucketName:
+          !FindInMap [S3AccessLogBuckets, !Ref "AWS::Region", BucketName]
+        LogFilePrefix: !Sub "det-${AppName}/"
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - GET
+            AllowedOrigins:
+              - "*"
+            MaxAge: 3000
+  PassRoleForRunningOwnTask:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName:
+        Fn::Sub: role-pass-${AppName}-${AppEnv}
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: VisualEditor0
+          Effect: Allow
+          Action: iam:PassRole
+          Resource:
+          - arn:aws:iam::364215618558:role/ecsTaskExecutionRole
+          - arn:aws:iam::364215618558:role/cat-alb-task-iam-v2
+      Groups:
+      - Ref: AppGroup
+  RunOwnTaskForTesting:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName:
+        Fn::Sub: access-to-ecs-${AppName}-${AppEnv}
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: VisualEditor0
+          Effect: Allow
+          Action:
+          - ecs:DescribeClusters
+          - ecs:DescribeContainerInstances
+          - ecs:DescribeServices
+          - ecs:DescribeTaskDefinition
+          - ecs:DescribeTasks
+          - ecs:ListClusters
+          - ecs:ListContainerInstances
+          - ecs:ListServices
+          - ecs:ListTaskDefinitionFamilies
+          - ecs:ListTaskDefinitionss
+          - ecs:ListTasks
+          - ecs:Poll
+          - ecs:RunTask
+          - ecs:StartTask
+          - ecs:StartTelemetrySession
+          - ecs:StopTask
+          - ecs:SubmitContainerStateChange
+          - ecs:SubmitTaskStateChange
+          Resource:
+            Fn::Sub: arn:aws:ecs:us-east-1:364215618558:task-definition/${AppName}-*
+      Groups:
+      - Ref: AppGroup
+  S3BucketPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName:
+        Fn::Sub: access-to-s3-default-${AppName}
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action:
+          - s3:ListBucket
+          Resource:
+          - Fn::Sub: arn:aws:s3:::det-${AppName}
+          Effect: Allow
+        - Action:
+          - "*"
+          Resource:
+          - Fn::Sub: arn:aws:s3:::det-${AppName}/*
+          Effect: Allow
+      Groups:
+      - Ref: AppGroup
+  SQSDefaultActive:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 43200
+      QueueName:
+        Fn::Sub: "${AppName}-default-${AppEnv}"
+      KmsMasterKeyId: !Ref KmsMasterKeyId
+      KmsDataKeyReusePeriodSeconds: 500
+  SQSPolicyActive:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName:
+        Fn::Sub: access-to-sqs-${AppName}-${AppEnv}
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action:
+          - sqs:*
+          Resource:
+            Fn::Sub: arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${AppName}-*-${AppEnv}
+          Effect: Allow
+        - Action:
+          - kms:Decrypt
+          Resource: !Ref KmsMasterKeyId
+          Effect: Allow
+      Groups:
+        - Ref: AppGroup
+  SecretCore:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "cat/${AppName}-${AppEnv}/core"
+      Description: !Sub "Core secrets for ${AppName}-${AppEnv}"
+      SecretString: !Sub |
+        APP_ENV="${AppEnv}"
+        APP_NAME="${AppName}"
+        APP_KEY="${AppKey}"
+        APP_DEBUG="false"
+        FILESYSTEM_DRIVER="s3"
+        QUEUE_DRIVER="sqs"
+        AWS_ACCESS_KEY_ID="${UserAccessKey}"
+        AWS_SECRET_ACCESS_KEY="${UserAccessKey.SecretAccessKey}"
+        AWS_REGION="${AWS::Region}"
+        ACCOUNT_NAME="det"
+        ACCOUNT_ID="${AWS::AccountId}"
+  SecretAdditions:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "cat/${AppName}-${AppEnv}/additions"
+      Description: !Sub "Additional secrets for ${AppName}-${AppEnv}"
+      SecretString: 'FOO="test"'
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Condition: CreateAllResources
+    Properties:
+      Name: !Sub "${AppName}-${AppEnv}"
+      RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/service-role/cat-pipeline-role
+      Stages:
+        - Name: Source
+          Actions:
+            - InputArtifacts: []
+              Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: "1"
+                Provider: S3
+              OutputArtifacts:
+                - Name: SourceArtifacts
+              Configuration:
+                PollForSourceChanges: false
+                S3Bucket: !Sub "det-${AppName}"
+                S3ObjectKey: provision/staging/latest.zip
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: "1"
+                Provider: CodeBuild
+              InputArtifacts:
+                - Name: SourceArtifacts
+              OutputArtifacts:
+                - Name: BuildArtifacts
+              Configuration:
+                ProjectName: !Ref CodeBuildDeploySite
+              RunOrder: 1
+            - Name: UATBuild
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: "1"
+                Provider: CodeBuild
+              InputArtifacts:
+                - Name: SourceArtifacts
+              OutputArtifacts:
+                - Name: UATBuildArtifacts
+              Configuration:
+                ProjectName: !Ref CodeBuildDeployUATSite
+              RunOrder: 1
+            - Name: ProductionBuild
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: "1"
+                Provider: CodeBuild
+              InputArtifacts:
+                - Name: SourceArtifacts
+              OutputArtifacts:
+                - Name: ProdBuildArtifacts
+              Configuration:
+                ProjectName: !Ref CodeBuildDeployProductionSite
+              RunOrder: 1
+      ArtifactStore:
+        Type: S3
+        Location: !Sub "det-${AppName}"
+  CodeBuildDeploySite:
+    Type: AWS::CodeBuild::Project
+    Condition: CreateAllResources
+    Properties:
+      Name: !Sub "${AppName}-${AppEnv}"
+      Description: Deploy to ECR
+      ServiceRole: !Sub 'arn:aws:iam::${AWS::AccountId}:role/stratus-codebuild-role'
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:4.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AppEnv
+            Value: !Ref AppEnv
+          - Name: AppName
+            Value: !Ref AppName
+          - Name: AWSRegion
+            Value: !Ref AWS::Region
+          - Name: AWSAccountId
+            Value: !Ref AWS::AccountId
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub "buildspec.${AppEnv}.yaml"
+      TimeoutInMinutes: 10
+  CodeBuildDeployUATSite:
+    Type: AWS::CodeBuild::Project
+    Condition: CreateAllResources
+    Properties:
+      Name: !Sub "${AppName}-uat"
+      Description: Deploy to ECR
+      ServiceRole: !Sub 'arn:aws:iam::${AWS::AccountId}:role/stratus-codebuild-role'
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        PrivilegedMode: true
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:4.0
+        EnvironmentVariables:
+          - Name: AppEnv
+            Value: uat
+          - Name: AppName
+            Value: !Ref AppName
+          - Name: AWSRegion
+            Value: !Ref AWS::Region
+          - Name: AWSAccountId
+            Value: !Ref AWS::AccountId
+          - Name: ECRTag
+            Value: !Ref ECRTag
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspec.uat.yaml
+      TimeoutInMinutes: 10
+  CodeBuildDeployProductionSite:
+    Type: AWS::CodeBuild::Project
+    Condition: CreateAllResources
+    Properties:
+      Name: !Sub "${AppName}-production"
+      Description: Deploy site to S3
+      ServiceRole: !Sub 'arn:aws:iam::${AWS::AccountId}:role/stratus-codebuild-role'
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        PrivilegedMode: true
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:4.0
+        EnvironmentVariables:
+          - Name: AppEnv
+            Value: production
+          - Name: AppName
+            Value: !Ref AppName
+          - Name: AWSRegion
+            Value: !Ref AWS::Region
+          - Name: AWSAccountId
+            Value: !Ref AWS::AccountId
+          - Name: ECRTag
+            Value: !Ref ECRTag
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspec.production.yaml
+      TimeoutInMinutes: 10
+  TaskLogStreaming:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn: !GetAtt LogsStreamingFunction.Arn
+      FilterPattern: ''
+      LogGroupName: !Sub '/aws/ecs/${AppName}-${AppEnv}'
+    DependsOn:
+      - LogGroup
+  LogsStreamingFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AppName}-logs-to-logstash-${AppEnv}'
+      Description: !Sub Stream ${AppName} ${AppEnv} CloudWatch logs to Kibana
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/lambda_elasticsearch_execution'
+      VpcConfig:
+        SubnetIds: !FindInMap [LambdaSubnets, !Ref 'AWS::Region', !Ref AppEnv]
+        SecurityGroupIds:
+          - !FindInMap [SecurityGroups, !Ref 'AWS::Region', !Ref AppEnv]
+      Handler: index.handler
+      Code:
+        S3Bucket: !FindInMap [DeploymentSource, !Ref 'AWS::Region', BucketName]
+        S3Key: lambda-logs-to-logstash.zip
+      Runtime: nodejs14.x
+      MemorySize: 128
+      Environment:
+        Variables:
+          AppEnv: !Ref AppEnv
+          AppName: !Ref AppName
+      Timeout: 60
+  LogsStreamingFunctionLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      Principal: !Sub logs.${AWS::Region}.amazonaws.com
+      FunctionName: !Ref LogsStreamingFunction
+      SourceArn: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/ecs/${AppName}-${AppEnv}:*'
