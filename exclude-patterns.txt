@@ -1,0 +1,7 @@
+entrust_ev_ca.cer
+deploy/app/packaged/
+public/
+node_modules/
+vendors/
+src/resources/assets/builder
+deploy/app/node

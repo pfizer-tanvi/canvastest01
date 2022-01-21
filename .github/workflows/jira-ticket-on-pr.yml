@@ -1,0 +1,55 @@
+name: Turns PR into JIRA ticket if [ISSUE] is the start of it
+
+on:
+  pull_request:
+    types: [opened, edited, labeled, unlabeled]
+
+jobs:
+  checkIfNoJIra:
+    runs-on: ubuntu-latest
+    if: |
+      github.actor != 'dependabot[bot]' && startsWith(github.event.pull_request.title, 'NOJIRA') ||
+      startsWith(github.event.pull_request.title, '[NO-JIRA]') || 
+      startsWith(github.event.pull_request.title, 'NO-JIRA'))
+    steps:
+      - uses: actions/checkout@v2
+      - uses: hmarr/debug-action@v2
+      - name: create-jira-ticket
+        id: phase_one
+        run: |
+          export title="${{ github.event.pull_request.title }}"
+          echo ::set-output name=title::"${title#* }"
+
+      - name: Jira Creation
+        id: jira
+        uses: bryannice/gitactions-jira-issue-creation@master
+        env:
+          JIRA_ACCOUNT_URL: ${{ secrets.STRATUS_JIRA_URL }}
+          JIRA_API_TOKEN: ${{ secrets.STRATUS_JIRA_TOKEN }}
+          JIRA_ISSUE_DESCRIPTION: |
+            ## Related PR
+            ${{ github.event.pull_request.html_url }}
+            ## PR Body
+            ${{ github.event.pull_request.body }}
+          JIRA_ISSUE_SUMMARY: ${{steps.phase_one.outputs.title}}
+          JIRA_ISSUE_TYPE: Task
+          JIRA_PROJECT: CAP
+          JIRA_USERNAME: ${{ secrets.STRATUS_JIRA_USER }}
+
+      - name: create-jira-ticket
+        id: phase_two
+        run: |
+          export jira_issue_url=${{ steps.jira.outputs.jira_issue_url }}
+          echo ::set-output name=jira_id::"${jira_issue_url##*/}"
+          
+      - name: check-no-jira-in-pr-name
+        uses: tzkhan/pr-update-action@v2
+        with:
+          repo-token: "${{ secrets.GITHUB_TOKEN }}"
+          title-template: "${{steps.phase_two.outputs.jira_id}} - ${{steps.phase_one.outputs.title}}"
+          title-update-action: replace
+          head-branch-regex: ".+"
+          body-template: |
+            ## 🚀  JIRA Ticket Created via GitHub Action
+            [${{steps.phase_two.outputs.jira_id}}](https://digitalpfizer.atlassian.net/browse/${{steps.phase_two.outputs.jira_id}})
+            ## 🚚  Original Description
