@@ -1,0 +1,66 @@
+###
+# Goal is to allow a npm audit fix to be triggered via and API request using
+# https://help.github.com/en/actions/reference/events-that-trigger-workflows#external-events-repository_dispatch
+# When triggered it will
+# Start an action
+# Checkout the code
+# Install and run npm audit fix
+# Make branch and commit to trigger Travis
+# Wait for Travis to finish running to merge PR if all is good
+###
+name: npm-audit-fix
+on:
+  repository_dispatch:
+    types: run-npm-audit
+jobs:
+  run-npm-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v1
+        with:
+          fetch-depth: 1
+
+      - name: Prepare Laravel Application
+        run: |
+          cp .env.travis .env
+
+      - name: NPM Dependencies Install and Fix
+        run: |
+          echo "Installing dependencies..."
+          npm ci
+          echo "Running Audit Fix..."
+          npm audit fix
+
+      - name: create-pr
+        uses: gr2m/create-or-update-pull-request-action@v1.x
+        with:
+          title: "[Snyk] - NPM Audit Fix"
+          body: "Created by Stratus Security"
+          branch: snyk-${{ github.sha }}
+          commit-message: "if TravisCI passes it should auto merge"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "Add label"
+        uses: actions/github-script@0.5.0
+        with:
+          github-token: ${{secrets.ACCESS_TOKEN}}
+          script: |
+            github.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open"
+            }).then(response => {
+                response.data.forEach(item => {
+                  if(item.title.includes("NPM Audit Fix")) {
+                    github.pulls.createReview({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      pull_number: item.number,
+                      body: "This is an automated PR so we are approving it automatically as well.",
+                      event: "APPROVE"
+                    })
+                  }
+                })
+            });

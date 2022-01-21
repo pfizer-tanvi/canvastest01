@@ -1,0 +1,27 @@
+change-template: "- $TITLE @$AUTHOR"
+version-template: $MAJOR.$MINOR
+replacers:
+  - search: '/CVE-(\d{4})-(\d+)/g'
+    replace: "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-$1-$2"
+categories:
+  - title: "🚀 Features and Enhancements"
+    labels:
+      - "feature"
+      - "enhancement"
+  - title: "🐛 Bug Fixes"
+    labels:
+      - "fix"
+      - "bugfix"
+      - "bug"
+  - title: "🔐 Security"
+    labels:
+      - "security"
+      - "snyk"
+  - title: "🧰 Maintenance"
+    label: "chore"
+  - title: "✅ QA"
+    label: "qa"
+template: |
+  ## What’s Changed
+
+  $CHANGES

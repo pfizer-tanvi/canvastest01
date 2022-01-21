@@ -1,0 +1,92 @@
+name: Snyk PR Automerge
+on:
+  pull_request:
+    types:
+      #- labeled
+      # - unlabeled
+      # - synchronize
+      - opened
+      - edited
+      # - ready_for_review
+      - reopened
+      # - unlocked
+  pull_request_review:
+    types:
+      - submitted
+      #- edited
+jobs:
+  pr-labeler:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: TimonVS/pr-labeler-action@v3
+        with:
+          configuration-path: .github/pr-labeler.yml # optional, .github/pr-labeler.yml is the default value
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  check_title_for_snyk:
+    runs-on: ubuntu-latest
+    needs: pr-labeler
+    steps:
+      - name: Set To Reviewed
+        uses: actions/github-script@0.5.0
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            console.log("v01")
+            const title = context.payload.pull_request.title
+            const pr_number = context.payload.pull_request.number
+            const snyk = title.includes("[Snyk]")
+
+            if(snyk) {
+              console.log("Snyk based PR")
+              github.pulls.listReviews({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr_number
+              }).then(results => {
+                const how_many = results.data.length
+                console.log("Number of reviews", how_many)
+                if(how_many < 1) {
+                  github.pulls.createReview({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: pr_number,
+                    body: "This is a Snyk PR so it is reviewed and approved already",
+                    event: "APPROVE"
+                  })
+                }
+              })
+            } else {
+              console.log("Snyk not in the PR title")
+            }
+  automerge:
+    needs: check_title_for_snyk
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Wait for status checks"
+        id: waitforstatuschecks
+        uses: "WyriHaximus/github-action-wait-for-status@master"
+        with:
+          ignoreActions: automerge
+          checkInterval: 60
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+      - name: "Merge"
+        uses: actions/github-script@0.5.0
+        if: steps.waitforstatuschecks.outputs.status == 'success'
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const pr_number = context.payload.pull_request.number
+            const title = context.payload.pull_request.title
+            const snyk = title.includes("[Snyk]")
+            if(snyk) {
+                  github.pulls.merge({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: pr_number,
+                    commit_message: "This is a Snyk PR so it is reviewed and approved already",
+                    commit_title: "Snyk PR",
+                    merge_method: "merge"
+                  })
+                }

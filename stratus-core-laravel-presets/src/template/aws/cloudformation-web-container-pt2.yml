@@ -1,0 +1,556 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Build a Task Definition and deploy to docker ECS
+Mappings:
+  ShortenEnvNameForCFLimits:
+    production:
+      Name: prod
+    staging:
+      Name: stage
+    uat:
+      Name: uat
+  Configuration:
+    uat:
+      SubnetId: subnet-04d2739af85597d5c
+      ClusterName: cat-platform-staging
+      EC2SecurityGroup: sg-06da11f526b4c2a93
+      PfizerSSH: sg-0c3e1ddf99a86e220
+      EFSRoute: fs-5350f89b.efs.eu-west-1.amazonaws.com
+      HostedZone: ZJ9T4VL4W96G4
+      VpcID: vpc-093d2efc0a28fefc2
+      ALBDNSName: cat-plaform-staging-783672209.eu-west-1.elb.amazonaws.com
+      ALBDNSNamePrivate: cat-platform-private-staging-477048154.eu-west-1.elb.amazonaws.com
+      PipelineRole: arn:aws:iam::364215618558:role/service-role/cat-pipeline-role
+      ListenerNonSSL: arn:aws:elasticloadbalancing:eu-west-1:364215618558:listener/app/cat-plaform-staging/0964f66ca2f2956d/dbd84bbeeb7e5446
+      ListenerSSL: arn:aws:elasticloadbalancing:eu-west-1:364215618558:listener/app/cat-plaform-staging/0964f66ca2f2956d/7db6c5e64f4358b8
+      ListenerNonSSLPrivate: arn:aws:elasticloadbalancing:eu-west-1:364215618558:listener/app/cat-platform-private-staging/b94407d63c6447e7/12c2f5c22b2dd52f
+      ListenerSSLPrivate: arn:aws:elasticloadbalancing:eu-west-1:364215618558:listener/app/cat-platform-private-staging/b94407d63c6447e7/277b6a7bce41066c
+    staging:
+      SubnetId: subnet-04d2739af85597d5c
+      ClusterName: cat-platform-staging
+      EC2SecurityGroup: sg-06da11f526b4c2a93
+      PfizerSSH: sg-0c3e1ddf99a86e220
+      EFSRoute: fs-5350f89b.efs.eu-west-1.amazonaws.com
+      HostedZone: ZJ9T4VL4W96G4
+      VpcID: vpc-093d2efc0a28fefc2
+      ALBDNSName: cat-plaform-staging-783672209.eu-west-1.elb.amazonaws.com
+      ALBDNSNamePrivate: cat-platform-private-staging-477048154.eu-west-1.elb.amazonaws.com
+      PipelineRole: arn:aws:iam::364215618558:role/service-role/cat-pipeline-role
+      ListenerNonSSL: arn:aws:elasticloadbalancing:eu-west-1:364215618558:listener/app/cat-plaform-staging/0964f66ca2f2956d/dbd84bbeeb7e5446
+      ListenerSSL: arn:aws:elasticloadbalancing:eu-west-1:364215618558:listener/app/cat-plaform-staging/0964f66ca2f2956d/7db6c5e64f4358b8
+      ListenerNonSSLPrivate: arn:aws:elasticloadbalancing:eu-west-1:364215618558:listener/app/cat-platform-private-staging/b94407d63c6447e7/12c2f5c22b2dd52f
+      ListenerSSLPrivate: arn:aws:elasticloadbalancing:eu-west-1:364215618558:listener/app/cat-platform-private-staging/b94407d63c6447e7/277b6a7bce41066c
+    production:
+      SubnetId: subnet-00f4aff7bc75e8261
+      EC2SecurityGroup: sg-0816610c86245d333
+      PfizerSSH: sg-018c25a1939654ec1
+      ClusterName: cat-platform-production
+      ALBDNSName: cat-plaform-production-1946801102.eu-west-1.elb.amazonaws.com
+      ALBDNSNamePrivate: cat-platform-private-production-530942397.eu-west-1.elb.amazonaws.com
+      EFSRoute: fs-2ee844e6.efs.eu-west-1.amazonaws.com
+      HostedZone: ZJ9T4VL4W96G4
+      VpcID: vpc-04aec006fbb5e790d
+      PipelineRole: arn:aws:iam::364215618558:role/service-role/cat-pipeline-role
+      ListenerNonSSL: arn:aws:elasticloadbalancing:eu-west-1:364215618558:listener/app/cat-plaform-production/4c92e1ef63a79150/247de9209d51d5c1
+      ListenerSSL: arn:aws:elasticloadbalancing:eu-west-1:364215618558:listener/app/cat-plaform-production/4c92e1ef63a79150/16b1757c1fcad993
+      ListenerNonSSLPrivate: arn:aws:elasticloadbalancing:eu-west-1:364215618558:listener/app/cat-platform-private-production/89251846fb480610/b52bafa5bcefd464
+      ListenerSSLPrivate: arn:aws:elasticloadbalancing:eu-west-1:364215618558:listener/app/cat-platform-private-production/89251846fb480610/2664f8515bba99dc
+  S3LogBuckets:
+    us-east-1:
+      BucketName: pfe-s3-access-logs
+    eu-west-1:
+      BucketName: pfe-s3-access-logs-eu-west-1
+Conditions:
+  IsPublicSite: !Equals
+    - !Ref PublicSite
+    - "yes"
+  IsProduction: !Equals
+    - !Ref AppEnv
+    - production
+Parameters:
+  Memory:
+    Type: Number
+    Default: 250
+    Description: Does it really need more megs?
+  AppEnv:
+    Type: String
+    Description: defaults to staging
+    Default: uat
+    AllowedValues:
+      - production
+      - uat
+  PublicSite:
+    Type: String
+    Description: Can the site be accessed from the general internet (yes) or only from Pfizer network (no)
+    Default: "no"
+    AllowedValues:
+      - "yes"
+      - "no"
+  AppName:
+    Type: String
+    Description: will NOT include the APP_ENV so foo-staging would be foo
+    MinLength: 1
+  AppID:
+    Type: Number
+    Description: You can get this by scanning ports see https://www.pfi.sr/Z2J
+    Default: 111
+  Version:
+    Type: String
+    Description: Helps with updating TargetGroups due to AWS limit just bump it up from 001
+    MinLength: 3
+    Default: "001"
+  UniqueDomainName:
+    Default: foo-qa.digitalpfizer.com
+    Type: String
+    Description: e.g. foo-qa.digitalpfizer.com
+  AppKey:
+    Type: String
+    Description: Laravel app key
+    MinLength: 1
+    NoEcho: true
+  DbHost:
+    Type: String
+    Description: Shared CAT Platform database
+    MinLength: 1
+    NoEcho: true
+  DbName:
+    Type: String
+    Description: Database name
+    MinLength: 1
+  DbUsername:
+    Type: String
+    Description: Database user
+    MinLength: 1
+  DbPassword:
+    Type: String
+    Description: Database password
+    MinLength: 1
+    NoEcho: true
+  CognitoClientSecret:
+    Type: String
+    Description: Cognito Client Secret, need to get this manually after the stack is built
+    Default: ""
+    NoEcho: true
+  ParentProject:
+    Type: String
+    Description: The name of the product tower, funding source, or key area that owns this application
+    MinLength: 1
+  BillingRef:
+    Type: String
+    Description: The rolled-up reference for billing purposes, prefixed with the parent_project abbreviation
+    MinLength: 1
+  KeyContact:
+    Type: String
+    Description: The full name of the Pfizer Engineering Lead responsible for the project/application
+    MinLength: 1
+  CostCenterId:
+    Type: String
+    Description: The cost center in which the costs will be billed
+    MinLength: 1
+  BuildType:
+    Type: String
+    Description: The build container type to use for building the app
+    Default: LINUX_CONTAINER
+  BuildComputeType:
+    Type: String
+    Description: The build compute type to use for building the app
+    Default: BUILD_GENERAL1_SMALL
+  BuildImage:
+    Type: String
+    Description: The build image to use for building the app
+    Default: aws/codebuild/standard:1.0
+  DesiredCount:
+    Type: Number
+    Description: Set this to 0 for 1st build after that leave at 1
+    Default: 0
+    MaxValue: 1
+  ECRTag:
+    Type: String
+    Description: This is the ecr tag with prefix uat_ production_ this is what Stratus will set
+Outputs:
+  DomainName:
+    Value: !Sub "https://${UniqueDomainName}"
+    Description: Domain Name
+Resources:
+  AppGroup:
+    Type: AWS::IAM::Group
+  AppUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub "svc-${AppName}-${AppEnv}"
+      Path: /
+    DependsOn:
+      - AppGroup
+  UserAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref AppUser
+    DependsOn:
+      - AppUser
+  AddUserToGroup:
+    Type: AWS::IAM::UserToGroupAddition
+    Properties:
+      GroupName: !Ref AppGroup
+      Users:
+        - !Ref AppUser
+    DependsOn:
+      - AppUser
+      - AppGroup
+  ClusterService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !FindInMap [Configuration, !Ref AppEnv, ClusterName]
+      ServiceName: !Sub "${AppName}-${AppEnv}-${Version}"
+      SchedulingStrategy: REPLICA
+      DesiredCount: !Ref DesiredCount
+      LoadBalancers:
+        - ContainerName: !Sub "${AppName}-${AppEnv}"
+          ContainerPort: 443
+          TargetGroupArn: !Ref TargetGroupSSL
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 0
+      TaskDefinition: !Ref TaskDefinition
+      Tags:
+        - Key: application
+          Value: !Ref AppName
+        - Key: billing_ref
+          Value: !Ref BillingRef
+        - Key: parent_project
+          Value: !Ref ParentProject
+        - Key: key_contact
+          Value: !Ref KeyContact
+        - Key: environment
+          Value: !Ref AppEnv
+        - Key: CostCenterID
+          Value: !Ref CostCenterId
+    DependsOn:
+      - ListenerRuleHttps
+  CognitoClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - email
+        - openid
+        - profile
+      AllowedOAuthFlowsUserPoolClient: true
+      CallbackURLs:
+        - !Sub "https://${UniqueDomainName}/auth/cognito"
+      ClientName: !Sub "${AppName}-${AppEnv}"
+      DefaultRedirectURI: !Sub "https://${UniqueDomainName}/auth/cognito"
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      GenerateSecret: true
+      LogoutURLs:
+        - !Sub "https://${UniqueDomainName}/auth/cognito/logout"
+      PreventUserExistenceErrors: LEGACY
+      ReadAttributes:
+        - email
+        - custom:guid
+        - custom:ntid
+        - custom:group
+        - custom:grouplist
+        - custom:family_name
+        - custom:name
+      RefreshTokenValidity: 3500
+      SupportedIdentityProviders:
+        - !If
+          - IsProduction
+          - pfizer-saml-production
+          - pfizer-saml
+      UserPoolId: eu-west-1_XqKGA2Dyi
+      WriteAttributes:
+        - email
+        - custom:guid
+        - custom:ntid
+        - custom:group
+        - custom:grouplist
+        - custom:family_name
+        - custom:name
+  SecretCore:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "cat/${AppName}-${AppEnv}/core"
+      Description: !Sub "Core secrets for ${AppName}-${AppEnv}"
+      SecretString: !Sub |
+        APP_ENV="${AppEnv}"
+        APP_NAME="${AppName}"
+        APP_URL="https://${UniqueDomainName}"
+        APP_KEY="${AppKey}"
+        APP_DEBUG="false"
+        DB_HOST="${DbHost}"
+        DB_CONNECTION="mysql"
+        DB_USERNAME="${DbUsername}"
+        DB_PASSWORD="${DbPassword}"
+        DB_DATABASE="${DbName}"
+        QUEUE_DRIVER="sqs"
+        AWS_ACCESS_KEY_ID="${UserAccessKey}"
+        AWS_SECRET_ACCESS_KEY="${UserAccessKey.SecretAccessKey}"
+        AWS_REGION="${AWS::Region}"
+        ACCOUNT_NAME="det"
+        ACCOUNT_ID="${AWS::AccountId}"
+        COGNITO_KEY="${CognitoClient}"
+        COGNITO_SECRET="${CognitoClientSecret}"
+        COGNITO_ENDPOINT="https://cat-platform.auth.eu-west-1.amazoncognito.com"
+        COGNITO_REDIRECT_URI="https://${UniqueDomainName}/auth/cognito"
+      Tags:
+        - Key: application
+          Value: !Ref AppName
+        - Key: billing_ref
+          Value: !Ref BillingRef
+        - Key: parent_project
+          Value: !Ref ParentProject
+        - Key: key_contact
+          Value: !Ref KeyContact
+        - Key: environment
+          Value: !Ref AppEnv
+        - Key: CostCenterID
+          Value: !Ref CostCenterId
+  SecretAdditions:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "cat/${AppName}-${AppEnv}/additions"
+      Description: !Sub "Additional secrets for ${AppName}-${AppEnv}"
+      SecretString: 'FOO="test"'
+      Tags:
+        - Key: application
+          Value: !Ref AppName
+        - Key: billing_ref
+          Value: !Ref BillingRef
+        - Key: parent_project
+          Value: !Ref ParentProject
+        - Key: key_contact
+          Value: !Ref KeyContact
+        - Key: environment
+          Value: !Ref AppEnv
+        - Key: CostCenterID
+          Value: !Ref CostCenterId
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ExecutionRoleArn: ""
+      Memory: !Ref Memory
+      NetworkMode: bridge
+      TaskRoleArn: arn:aws:iam::364215618558:role/cat-alb-task-iam-v2
+      ContainerDefinitions:
+        - Name: !Sub "${AppName}-${AppEnv}"
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AppName}:${ECRTag}"
+          PortMappings:
+            - ContainerPort: 80
+              HostPort: 0
+            - ContainerPort: 443
+              HostPort: 0
+          Memory: !Ref Memory
+          MountPoints:
+            - SourceVolume: shared
+              ContainerPath: /opt/shared
+      Volumes:
+        - Name: shared
+          Host:
+            SourcePath: /opt/shared
+      Tags:
+        - Key: application
+          Value: !Ref AppName
+        - Key: billing_ref
+          Value: !Ref BillingRef
+        - Key: parent_project
+          Value: !Ref ParentProject
+        - Key: key_contact
+          Value: !Ref KeyContact
+        - Key: environment
+          Value: !Ref AppEnv
+        - Key: CostCenterID
+          Value: !Ref CostCenterId
+  TargetGroupSSL:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 20
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: HTTPS
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 4
+      Matcher:
+        HttpCode: "200,403,404,400,401,301,302"
+      Name: !Sub
+        - "${AppName}-${ShortenENV}-ssl-${Version}"
+        - ShortenENV: !FindInMap
+            - ShortenEnvNameForCFLimits
+            - !Ref AppEnv
+            - Name
+      Port: 443
+      Protocol: HTTPS
+      UnhealthyThresholdCount: 2
+      VpcId: !FindInMap [Configuration, !Ref AppEnv, VpcID]
+      Tags:
+        - Key: application
+          Value: !Ref AppName
+        - Key: billing_ref
+          Value: !Ref BillingRef
+        - Key: parent_project
+          Value: !Ref ParentProject
+        - Key: key_contact
+          Value: !Ref KeyContact
+        - Key: environment
+          Value: !Ref AppEnv
+        - Key: CostCenterID
+          Value: !Ref CostCenterId
+  ListenerRuleHttp:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: redirect
+          RedirectConfig:
+            Host: !Ref UniqueDomainName
+            Protocol: HTTPS
+            Port: 443
+            StatusCode: HTTP_301
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref UniqueDomainName
+      ListenerArn: !If
+        - IsPublicSite
+        - !FindInMap [Configuration, !Ref AppEnv, ListenerNonSSL]
+        - !FindInMap [Configuration, !Ref AppEnv, ListenerNonSSLPrivate]
+      Priority: !Ref AppID
+    DependsOn:
+      - TargetGroupSSL
+  ListenerRuleHttps:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupSSL
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref UniqueDomainName
+      ListenerArn: !If
+        - IsPublicSite
+        - !FindInMap [Configuration, !Ref AppEnv, ListenerSSL]
+        - !FindInMap [Configuration, !Ref AppEnv, ListenerSSLPrivate]
+      Priority: !Ref AppID
+    DependsOn:
+      - TargetGroupSSL
+  Route53:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !FindInMap [Configuration, !Ref AppEnv, HostedZone]
+      Comment: DNS For the Docker Image
+      Name: !Ref UniqueDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !If
+          - IsPublicSite
+          - !FindInMap [Configuration, !Ref AppEnv, ALBDNSName]
+          - !FindInMap [Configuration, !Ref AppEnv, ALBDNSNamePrivate]
+        HostedZoneId: Z32O12XQLNTSW2
+  SQSDefaultActive:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 43200
+      QueueName: !Sub "${AppName}-default-${AppEnv}"
+      Tags:
+        - Key: application
+          Value: !Ref AppName
+        - Key: billing_ref
+          Value: !Ref BillingRef
+        - Key: parent_project
+          Value: !Ref ParentProject
+        - Key: key_contact
+          Value: !Ref KeyContact
+        - Key: environment
+          Value: !Ref AppEnv
+        - Key: CostCenterID
+          Value: !Ref CostCenterId
+  SQSPolicyActive:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "access-to-sqs-${AppName}-${AppEnv}"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sqs:*
+            Resource: !Sub "arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${AppName}-*-${AppEnv}"
+            Effect: Allow
+      Groups:
+        - !Ref AppGroup
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Application Metadata"
+        Parameters:
+          - AppEnv
+          - AppID
+          - UniqueDomainName
+          - AppName
+          - ParentProject
+          - BillingRef
+          - KeyContact
+          - CostCenterId
+          - PublicSite
+      - Label:
+          default: "Application Data"
+        Parameters:
+          - AppKey
+          - DbHost
+          - DbName
+          - DbUsername
+          - DbPassword
+          - CognitoClientSecret
+      - Label:
+          default: "Application & Pipeline Resources"
+        Parameters:
+          - Memory
+          - BuildType
+          - BuildComputeType
+          - BuildImage
+          - DesiredCount
+    ParameterLabels:
+      AppId:
+        default: "Application ID"
+      AppName:
+        default: "Application Name"
+      Memory:
+        default: "Application Memory"
+      UniqueDomainName:
+        default: "Unique Domain Name"
+      ParentProject:
+        default: "Parent Project"
+      BillingRef:
+        default: "Billing Reference"
+      KeyContact:
+        default: "Key Contact"
+      CostCenterId:
+        default: "Cost Center ID"
+      PublicSite:
+        default: "Is the site accessible from outside the Pfizer network?"
+      AppEnv:
+        default: "Application Environment"
+      AppKey:
+        default: "Application Key"
+      DbName:
+        default: "Database Name"
+      DbPassword:
+        default: "Database Password"
+      DbHost:
+        default: "Database Host"
+      DbUsername:
+        default: "Database Username"
+      CognitoClientSecret:
+        default: "Cognito Client Secret"
+      BuildType:
+        default: "Pipeline Type"
+      BuildComputeType:
+        default: "Pipeline Instance Size"
+      BuildImage:
+        default: "Pipeline Build Image"
+      DesiredCount:
+        default: "Amount of Application Replicas"

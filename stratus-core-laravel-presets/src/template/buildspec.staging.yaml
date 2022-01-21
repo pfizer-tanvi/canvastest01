@@ -1,0 +1,30 @@
+version: 0.2
+phases:
+    pre_build:
+        commands:
+            - echo Logging in to Amazon ECR for region ${AWSRegion}
+            - eval $(aws ecr get-login --no-include-email --region ${AWSRegion})
+            - echo "Getting ENV file from Secrets cat/${AppName}-${AppEnv}/core"
+            - aws secretsmanager get-secret-value --secret-id "cat/${AppName}-${AppEnv}/core" --query SecretString --output text --region eu-west-1 > .env
+            - echo "Getting Core Env Settings"
+            - printf "\n# ENV CORE SETTINGS\n" >> .env
+            - aws secretsmanager get-secret-value --secret-id "cat/env/core" --query SecretString --output text --region eu-west-1 >> .env
+            - printf "\n# END ENV CORE SETTINGS\n" >> .env
+            - echo "Getting your env additions"
+            - printf "\n# ENV ADDITIONS\n" >> .env
+            - aws secretsmanager get-secret-value --secret-id "cat/${AppName}-${AppEnv}/additions" --query SecretString --output text --region eu-west-1 >> .env
+            - printf "\n# END ENV ADDITIONS\n" >> .env
+            - sed -e "s/APP_ENV/${AppEnv}/g" -e "s/APP_NAME/${AppName}/g"  filebeat-template.yml > filebeat.yml
+            - cp supervisor-staging.ini supervisor.ini
+    build:
+        commands:
+            - docker pull ${AppName}:latest ${AWSAccountId}.dkr.ecr.${AWSRegion}.amazonaws.com/${AppName}:latest || true
+            - docker build -t ${AppName} .
+            - docker tag ${AppName}:latest ${AWSAccountId}.dkr.ecr.${AWSRegion}.amazonaws.com/${AppName}:latest
+    post_build:
+        commands:
+            - echo Build completed on `date`
+            - echo Pushing the Docker image...
+            - docker push ${AWSAccountId}.dkr.ecr.${AWSRegion}.amazonaws.com/${AppName}:latest
+artifacts:
+    files: imagedefinitions.json

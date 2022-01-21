@@ -1,0 +1,27 @@
+- name: bug
+  color: d73a4a
+  description: "Something isn't working"
+- name: documentation
+  color: 0075ca
+  description: "Improvements or additions to documentation"
+- name: automerge
+  color: bfd4f2
+  description: "This will be assigned for Snyk branches to use for automerges"
+- name: duplicate
+  color: cfd8d7
+  description: "This issue or pull request already exists"
+- name: enhancement
+  color: a22eef
+- name: wontfix_it
+  color: "000000"
+  description: "This will not be worked on"
+  from_name: wontfix
+- name: qa
+  color: "d456dd"
+  description: "Testing this is working"
+- name: security
+  color: "cfd8d7"
+  description: "QA Work"
+- name: infrastructure
+  color: "db641f"
+  description: "Infrastructure Changes"

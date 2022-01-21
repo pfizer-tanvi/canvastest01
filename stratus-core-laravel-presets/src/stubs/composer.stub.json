@@ -1,0 +1,10 @@
+{
+  "scripts": {
+    "check-style": "phpcs -p --standard=PSR2 --runtime-set ignore_errors_on_exit 1 --runtime-set ignore_warnings_on_exit 1 app",
+    "fix-style": "phpcbf -p --standard=PSR2 --runtime-set ignore_errors_on_exit 1 --runtime-set ignore_warnings_on_exit 1 app",
+    "check-metrics": "phpmetrics --report-json=report.json app && vendor/bin/quality_run_check.py report.json",
+    "check-metrics-html": "phpmetrics --report-json=report.json --report-html=report app && open report/index.html",
+    "check-phpstan": "php artisan code:analyse --paths=app --level=0",
+    "test": ["@check-style", "@check-metrics", "@check-phpstan"]
+  }
+}

@@ -1,0 +1,58 @@
+os: linux
+dist: trusty
+language: php
+php:
+  - "7.2"
+addons:
+  mariadb: "10.2"
+  apt:
+    packages:
+      - "python3"
+      - "python3-pip"
+services:
+  - mysql
+cache:
+  directories:
+    - $COMPOSER_CACHE_DIR
+    - $HOME/.composer/cache
+    - vendor
+    - node_modules
+after_success:
+  - pip install --user awscli
+before_deploy:
+  - rm .env
+  - php artisan clear-compiled
+  - composer install --no-dev --prefer-dist --no-interaction
+  - php artisan view:clear
+  - php artisan cache:clear
+  - php artisan clear-compiled
+  - echo "" > storage/logs/laravel.log
+deploy:
+  skip_cleanup: true
+  provider: script
+  script: bash ./codepipeline.sh
+  on:
+    branch: mainline
+before_script:
+  - cp .env.travis .env.dusk.testing
+  - sed -i -- 's|QUEUE_DRIVER=sync|QUEUE_DRIVER=null|g' .env.dusk.testing
+  - mysql -e 'CREATE DATABASE IF NOT EXISTS test;'
+  - cp .env.travis .env
+  - npm install
+  - npm run production
+  - git clone --depth 1 https://${GITHUB_TOKEN}@github.com/pfizer/cat-quality-script.git
+  - sudo pip3 install -r cat-quality-script/requirements.txt
+  - composer self-update
+  - composer global require phpmetrics/phpmetrics:^2.4
+  - composer config -g github-oauth.github.com ${GITHUB_TOKEN}
+  - COMPOSER_MEMORY_LIMIT=-1 travis_retry composer update --prefer-dist --no-interaction
+script:
+  - set -e
+  - vendor/bin/phpcs --standard=psr2 app/
+  - ~/.composer/vendor/bin/phpmetrics --report-json=report.json app
+  - python3 cat-quality-script/quality_service_client_run.py report.json
+  - echo "More about larastan here https://teamdocs.digitalpfizer.com/larastan"
+  - php artisan code:analyse -l 7
+  - vendor/bin/phpunit --coverage-clover clover.xml --stop-on-failure
+  - php ./coverage-checker.php clover.xml 75
+  - npm test

@@ -1,0 +1,53 @@
+{
+  "name": "pfizer/stratus-core-laravel-presets",
+  "require": {
+    "laravel/ui": "1.* || 2.*",
+    "aws/aws-sdk-php": "~3.0",
+    "league/flysystem-aws-s3-v3": "^1.0",
+    "pfizer/cognito-auth-php": "^4.0",
+    "pfizer/security-audit-laravel": "^2.0",
+    "pusher/pusher-php-server": "^4.0",
+    "illuminate/support": "6.*||7.*",
+    "friendsofcat/laravel-feature-flag": "^3.1",
+    "laravel/dusk": "5.*|| 6.*"
+  },
+  "require-dev": {
+    "codedungeon/phpunit-result-printer": "^0.26",
+    "pfizer/cat-quality-script": "^1.0@dev",
+    "orchestra/testbench": "^5.2"
+  },
+  "repositories": [
+    {
+      "type": "vcs",
+      "url": "https://github.com/pfizer/cognito-auth-php.git"
+    },
+    {
+      "type": "vcs",
+      "url": "https://github.com/pfizer/cat-quality-script.git"
+    },
+    {
+      "type": "vcs",
+      "url": "https://github.com/pfizer/security-audit-laravel.git"
+    }
+  ],
+  "autoload": {
+    "psr-4": {
+      "StratusCoreLaravelPresets\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Tests\\": "tests/"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "StratusCoreLaravelPresets\\StratusCoreLaravelPresetServiceProvider"
+      ]
+    }
+  },
+  "scripts": {
+    "test": "vendor/bin/phpunit --colors=always --testdox --stop-on-failure"
+  }
+}
