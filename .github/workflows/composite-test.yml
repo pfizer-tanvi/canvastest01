@@ -1,0 +1,14 @@
+on: [push]
+
+jobs:
+  testing_composite:
+    runs-on: ubuntu-latest
+    name: private composite actions
+    steps:
+      - uses: actions/checkout@v2
+      - id: test
+        uses: actions/stratus-gha-test@v1
+        with:
+          token: ${{ secrets.STRATUS_GITHUB_TOKEN }}
+          example_input: 'Mona the Octocat'
+          registry_password: "oops"
